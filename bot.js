@@ -25,8 +25,39 @@ function saveCharacters() {
   fs.writeFileSync(charactersFile, JSON.stringify(characters, null, 2));
 }
 
-// Load characters on startup
+// Load threads from file
+const threadsFile = path.join(__dirname, 'threads.json');
+let rpThreadsData = {};
+
+function loadThreads() {
+  if (fs.existsSync(threadsFile)) {
+    const data = fs.readFileSync(threadsFile, 'utf-8');
+    const loaded = JSON.parse(data);
+    // Convert invited arrays back to Sets
+    for (const threadId in loaded) {
+      if (loaded[threadId].invited) {
+        loaded[threadId].invited = new Set(loaded[threadId].invited);
+      }
+    }
+    rpThreadsData = loaded;
+  }
+}
+
+function saveThreads() {
+  const toSave = {};
+  for (const threadId in rpThreadsData) {
+    toSave[threadId] = {
+      ...rpThreadsData[threadId],
+      // Convert Sets to arrays for JSON serialization
+      invited: Array.from(rpThreadsData[threadId].invited || [])
+    };
+  }
+  fs.writeFileSync(threadsFile, JSON.stringify(toSave, null, 2));
+}
+
+// Load characters and threads on startup
 loadCharacters();
+loadThreads();
 
 // Command data
 const commands = [
@@ -110,13 +141,13 @@ client.once('ready', async () => {
   console.log(`✅ Bot logged in as ${client.user.tag}`);
 
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+  const route = process.env.DISCORD_GUILD_ID
+    ? Routes.applicationGuildCommands(process.env.DISCORD_CLIENT_ID, process.env.DISCORD_GUILD_ID)
+    : Routes.applicationCommands(process.env.DISCORD_CLIENT_ID);
 
   try {
     console.log('Refreshing application commands...');
-    await rest.put(
-      Routes.applicationCommands(process.env.DISCORD_CLIENT_ID),
-      { body: commands }
-    );
+    await rest.put(route, { body: commands });
     console.log('✅ Commands registered');
   } catch (error) {
     console.error('Error registering commands:', error);
@@ -144,27 +175,34 @@ client.on('interactionCreate', async interaction => {
         const parts = customId.split('_');
         const threadId = parts[2];
         const userId = parts[3];
-        
-        // Initialize invites set if needed
-        if (!client.rpInvites[threadId]) {
-          client.rpInvites[threadId] = new Set();
+        const threadData = client.rpThreads[threadId];
+
+        if (!threadData) {
+          return interaction.reply({ content: '❌ Thread data not found.', ephemeral: true });
         }
 
-        // Add user to invites
-        client.rpInvites[threadId].add(userId);
+        if (interaction.user.id !== userId) {
+          return interaction.reply({ content: '❌ Only the invited user can accept this invite.', ephemeral: true });
+        }
 
-        // Get thread and user
+        if (!threadData.invited) {
+          threadData.invited = new Set();
+        }
+        threadData.invited.add(userId);
+        saveThreads();
+
         const guild = client.guilds.cache.first();
         const thread = await guild?.channels.fetch(threadId).catch(() => null);
         const user = await client.users.fetch(userId).catch(() => null);
 
         if (thread && user) {
-          // Send notification to thread
           const acceptEmbed = new EmbedBuilder()
             .setColor('#00ff00')
-            .setDescription(`✅ **${user.username}** has been invited to the RP thread!`);
+            .setDescription(`✅ **${user.username}** has accepted the invite and joined the RP thread!`);
 
           await thread.send({ embeds: [acceptEmbed] });
+          await interaction.reply({ content: `✅ Invite accepted. Use "/charchange" in the thread to choose your character.`, ephemeral: true });
+          return;
         }
 
         await interaction.reply({ content: '✅ Invite accepted!', ephemeral: true });
@@ -173,10 +211,28 @@ client.on('interactionCreate', async interaction => {
 
       else if (customId.startsWith('invite_deny_')) {
         const parts = customId.split('_');
-        const userId = parts[2];
-        const user = await client.users.fetch(userId).catch(() => null);
+        const threadId = parts[2];
+        const userId = parts[3];
+        const threadData = client.rpThreads[threadId];
 
-        await interaction.reply({ content: `❌ Invite denied for **${user?.username || 'Unknown User'}**!`, ephemeral: true });
+        if (!threadData) {
+          return interaction.reply({ content: '❌ Thread data not found.', ephemeral: true });
+        }
+
+        if (interaction.user.id !== userId) {
+          return interaction.reply({ content: '❌ Only the invited user can deny this invite.', ephemeral: true });
+        }
+
+        const thread = await client.channels.fetch(threadId).catch(() => null);
+        const user = await client.users.fetch(userId).catch(() => null);
+        if (thread && user) {
+          const denyEmbed = new EmbedBuilder()
+            .setColor('#ff0000')
+            .setDescription(`❌ **${user.username}** declined the invite.`);
+          await thread.send({ embeds: [denyEmbed] });
+        }
+
+        await interaction.reply({ content: '❌ You declined the invite.', ephemeral: true });
         return;
       }
     }
@@ -290,21 +346,19 @@ client.on('interactionCreate', async interaction => {
       await thread.send({ embeds: [embed] });
 
       // Store thread info
-      if (!thread.client.rpThreads) {
-        thread.client.rpThreads = {};
+      if (!client.rpThreads[thread.id]) {
+        client.rpThreads[thread.id] = {
+          ownerId: userId,
+          users: {},
+          invited: new Set([userId])
+        };
       }
-      thread.client.rpThreads[thread.id] = {
-        characterId: `${userId}|${character.name}`,
-        userId,
+
+      client.rpThreads[thread.id].users[userId] = {
         characterName: character.name,
         avatarUrl: character.avatarUrl
       };
-
-      // Initialize invited users for this thread (add creator)
-      if (!thread.client.rpInvites) {
-        thread.client.rpInvites = {};
-      }
-      thread.client.rpInvites[thread.id] = new Set([userId]);
+      saveThreads();
 
       await interaction.reply({ content: `✅ RP Thread created: <#${thread.id}>`, ephemeral: true });
     }
@@ -323,12 +377,24 @@ client.on('interactionCreate', async interaction => {
         return interaction.reply({ content: '❌ Character not found!', ephemeral: true });
       }
 
-      // Update thread data
-      client.rpThreads[interaction.channelId] = {
-        userId,
+      // Update thread data for this user
+      if (!client.rpThreads[interaction.channelId]) {
+        client.rpThreads[interaction.channelId] = {
+          ownerId: userId,
+          users: {},
+          invited: new Set([userId])
+        };
+      }
+
+      const threadData = client.rpThreads[interaction.channelId];
+      threadData.users = threadData.users || {};
+      threadData.invited = threadData.invited || new Set();
+      threadData.users[userId] = {
         characterName: character.name,
         avatarUrl: character.avatarUrl
       };
+      threadData.invited.add(userId);
+      saveThreads();
 
       // Send notification
       const notifEmbed = new EmbedBuilder()
@@ -345,9 +411,8 @@ client.on('interactionCreate', async interaction => {
   }
 });
 
-// Track RP threads and invited users
-client.rpThreads = {};
-client.rpInvites = {}; // threadId -> Set of user IDs
+// Track RP threads (initialize from persisted data)
+client.rpThreads = rpThreadsData;
 
 // Message handler for RP threads
 client.on('messageCreate', async message => {
@@ -357,10 +422,10 @@ client.on('messageCreate', async message => {
 
     // Check if message is in an RP thread
     if (message.channel.isThread()) {
-      // Try to find thread data from stored threads or parent message
+      // Try to find thread data from stored threads
       let rpThreadData = client.rpThreads[message.channelId];
 
-      // If no stored data, check thread messages for character info
+      // If no stored data exists, infer initial thread owner from the first embed
       if (!rpThreadData) {
         const messages = await message.channel.messages.fetch({ limit: 10 });
         const charMessage = messages.find(m => m.embeds.length > 0 && m.embeds[0].title);
@@ -374,94 +439,107 @@ client.on('messageCreate', async message => {
             const char = chars.find(c => c.name === characterName);
             if (char) {
               rpThreadData = {
-                userId: uid,
-                characterName: characterName,
-                avatarUrl: char.avatarUrl
+                ownerId: uid,
+                users: {
+                  [uid]: {
+                    characterName: characterName,
+                    avatarUrl: char.avatarUrl
+                  }
+                },
+                invited: new Set([uid])
               };
+              client.rpThreads[message.channelId] = rpThreadData;
+              saveThreads();
               break;
             }
           }
         }
       }
 
-      // Check if user is invited to this thread
-      const invitedUsers = client.rpInvites[message.channelId] || new Set();
+      const invitedUsers = rpThreadData?.invited || new Set();
       const isInvited = invitedUsers.has(message.author.id);
 
-      // If not invited, handle invite request
-      if (!isInvited) {
-        const inviteMatch = message.content.match(/<@!?(\d+)>\s+invite/i);
+      const inviteMatch = message.content.match(/<@!?(\d+)>\s+invite/i);
+      const threadOwnerId = rpThreadData?.ownerId;
 
-        if (inviteMatch) {
-          const mentionedUserId = inviteMatch[1];
-          const mentionedUser = await client.users.fetch(mentionedUserId).catch(() => null);
+      if (inviteMatch && message.author.id === threadOwnerId) {
+        const mentionedUserId = inviteMatch[1];
+        const invitee = await client.users.fetch(mentionedUserId).catch(() => null);
 
-          if (!mentionedUser) {
-            await message.reply('❌ User not found!');
-            return;
-          }
+        if (!invitee) {
+          await message.reply('❌ User not found!');
+          return;
+        }
 
-          // Create invite request embed
-          const requestEmbed = new EmbedBuilder()
-            .setColor('#ff6b6b')
-            .setTitle('📨 RP Thread Invite Request')
-            .setDescription(`${message.author.username} is requesting to join the RP thread:\n**${message.channel.name}**`)
-            .setThumbnail(message.author.avatarURL())
-            .setTimestamp();
+        if (rpThreadData.invited?.has(mentionedUserId)) {
+          await message.reply('❌ That user is already invited.');
+          return;
+        }
 
-          // Create accept/deny buttons
-          const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-              .setCustomId(`invite_accept_${message.channelId}_${message.author.id}`)
-              .setLabel('Accept')
-              .setStyle(ButtonStyle.Success),
-            new ButtonBuilder()
-              .setCustomId(`invite_deny_${message.channelId}_${message.author.id}`)
-              .setLabel('Deny')
-              .setStyle(ButtonStyle.Danger)
-          );
+        const inviteEmbed = new EmbedBuilder()
+          .setColor('#ff6b6b')
+          .setTitle('📨 RP Thread Invitation')
+          .setDescription(`${message.author.username} invited you to join the RP thread **${message.channel.name}**.`)
+          .setFooter({ text: 'Accept to join and then use /charchange to select your character.' })
+          .setTimestamp();
 
-          // Send DM to thread creator
-          try {
-            await mentionedUser.send({ embeds: [requestEmbed], components: [row] });
-            await message.reply(`✅ Invite request sent to ${mentionedUser.username}!`);
-          } catch (error) {
-            await message.reply(`❌ Could not send invite request to ${mentionedUser.username}. They may have DMs disabled.`);
-          }
-        } else {
-          await message.reply('❌ You are not invited to this RP thread! Use `@username invite` to request an invite.');
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`invite_accept_${message.channelId}_${mentionedUserId}`)
+            .setLabel('Accept')
+            .setStyle(ButtonStyle.Success),
+          new ButtonBuilder()
+            .setCustomId(`invite_deny_${message.channelId}_${mentionedUserId}`)
+            .setLabel('Deny')
+            .setStyle(ButtonStyle.Danger)
+        );
+
+        try {
+          await invitee.send({ embeds: [inviteEmbed], components: [row] });
+          await message.reply(`✅ Invitation sent to ${invitee.username}!`);
+        } catch (error) {
+          await message.reply(`❌ Could not send the invite to ${invitee.username}. They may have DMs disabled.`);
         }
         return;
       }
 
-      // If we found character data and user is invited, process the message
+      if (!isInvited) {
+        await message.reply('❌ You are not invited to this RP thread. Only the owner can invite new users.');
+        return;
+      }
+
+      // If the user is invited, process the message below
       if (rpThreadData) {
         const userMessage = message.content;
-        const isAction = userMessage.startsWith('/action ') || (userMessage.startsWith('*') && userMessage.endsWith('*'));
-        const isOOC = (userMessage.startsWith('//') || userMessage.startsWith('(') && userMessage.endsWith(')'));
+        rpThreadData.users = rpThreadData.users || {};
+        let selectedChar = rpThreadData.users[message.author.id];
 
-        // Delete original message
+        if (!selectedChar) {
+          await message.reply('❌ You have been invited but do not have a selected character yet. Use `/charchange` in this thread to choose your character.');
+          return;
+        }
+
+        const isAction = userMessage.startsWith('/action ') || (userMessage.startsWith('*') && userMessage.endsWith('*'));
+        const isOOC = userMessage.startsWith('//') || (userMessage.startsWith('(') && userMessage.endsWith(')'));
+
         await message.delete().catch(() => {});
 
-        // Handle Out of Character (OOC) messages
         if (isOOC) {
-          const oocContent = userMessage.startsWith('//') 
-            ? userMessage.substring(2).trim() 
+          const oocContent = userMessage.startsWith('//')
+            ? userMessage.substring(2).trim()
             : userMessage.substring(1, userMessage.length - 1).trim();
 
           const oocEmbed = new EmbedBuilder()
             .setColor('#808080')
             .setAuthor({
-              name: `${rpThreadData.characterName} (OOC)`,
-              iconURL: rpThreadData.avatarUrl
+              name: `${selectedChar.characterName} (OOC)`,
+              iconURL: selectedChar.avatarUrl
             })
             .setDescription(oocContent)
             .setTimestamp();
 
           await message.channel.send({ embeds: [oocEmbed] });
-        }
-        // Handle actions
-        else if (isAction) {
+        } else if (isAction) {
           const actionContent = userMessage.startsWith('/action ')
             ? userMessage.substring(8).trim()
             : userMessage.substring(1, userMessage.length - 1).trim();
@@ -469,21 +547,19 @@ client.on('messageCreate', async message => {
           const actionEmbed = new EmbedBuilder()
             .setColor('#ff9900')
             .setAuthor({
-              name: rpThreadData.characterName,
-              iconURL: rpThreadData.avatarUrl
+              name: selectedChar.characterName,
+              iconURL: selectedChar.avatarUrl
             })
             .setDescription(`*${actionContent}*`)
             .setTimestamp();
 
           await message.channel.send({ embeds: [actionEmbed] });
-        }
-        // Handle normal dialogue
-        else {
+        } else {
           const dialogueEmbed = new EmbedBuilder()
             .setColor('#9900ff')
             .setAuthor({
-              name: rpThreadData.characterName,
-              iconURL: rpThreadData.avatarUrl
+              name: selectedChar.characterName,
+              iconURL: selectedChar.avatarUrl
             })
             .setDescription(userMessage)
             .setTimestamp();

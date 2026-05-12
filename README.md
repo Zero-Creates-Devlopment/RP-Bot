@@ -5,11 +5,13 @@ A Discord bot that allows you to create characters and roleplay in dedicated thr
 ## Features
 
 - 🎭 **Create Characters** - Build custom characters with names, descriptions, and avatars
-- 🧵 **RP Threads** - Create dedicated threads for each roleplay session- 🔐 **Invite-Only Threads** - Control who can participate in your RP threads- 💬 **Auto Message Replacement** - User messages are deleted and reposted as the character
-- � **Character Switching** - Change characters mid-RP with `/charchange`
+- 🧵 **RP Threads** - Create dedicated threads for each roleplay session
+- 🔐 **Invite-Only Threads** - Control who can participate in your RP threads
+- 💬 **Auto Message Replacement** - User messages are deleted and reposted as the character
+- 🔄 **Character Switching** - Change characters mid-RP with `/charchange`
 - 🎬 **Action Handling** - Perform actions with `/action` or `*actions*`
 - 🤐 **Out of Character** - Speak OOC with `//` or `()` without deletion
-- �📋 **Character Management** - List and delete your characters
+- 📋 **Character Management** - List and delete your characters
 
 ## Setup
 
@@ -46,6 +48,10 @@ DISCORD_CLIENT_ID=your_client_id_here
 DISCORD_GUILD_ID=your_guild_id_here
 DISCORD_RP_CHANNEL_ID=your_rp_channel_id_here
 ```
+- `DISCORD_CLIENT_ID` is your app client ID from the Discord Developer Portal
+- `DISCORD_GUILD_ID` is optional but recommended for fast, guild-specific slash command registration
+- `DISCORD_RP_CHANNEL_ID` is the channel where RP threads will be created
+
 (To get the channel ID, enable Developer Mode in Discord settings and right-click the channel)
 
 7. Run the bot:
