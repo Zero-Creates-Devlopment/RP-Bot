@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Collection, REST, Routes, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, REST, Routes, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, WebhookClient } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
@@ -58,6 +58,42 @@ function saveThreads() {
 // Load characters and threads on startup
 loadCharacters();
 loadThreads();
+
+// Webhooks cache
+const webhookCache = {};
+
+// Function to get or create a webhook for a character in a thread
+async function getOrCreateWebhook(thread, characterName, avatarUrl) {
+  const cacheKey = `${thread.id}_${characterName}`;
+  
+  // Return cached webhook if available
+  if (webhookCache[cacheKey]) {
+    return webhookCache[cacheKey];
+  }
+  
+  try {
+    // Get existing webhooks for the thread
+    const webhooks = await thread.fetchWebhooks();
+    const existing = webhooks.find(w => w.name === characterName);
+    
+    if (existing) {
+      webhookCache[cacheKey] = existing;
+      return existing;
+    }
+    
+    // Create a new webhook
+    const webhook = await thread.createWebhook({
+      name: characterName,
+      avatar: avatarUrl
+    });
+    
+    webhookCache[cacheKey] = webhook;
+    return webhook;
+  } catch (error) {
+    console.error('Error getting/creating webhook:', error);
+    return null;
+  }
+}
 
 // Command data
 const commands = [
@@ -534,47 +570,28 @@ client.on('messageCreate', async message => {
 
         await message.delete().catch(() => {});
 
+        // Get or create webhook for this character
+        const webhook = await getOrCreateWebhook(message.channel, selectedChar.characterName, selectedChar.avatarUrl);
+        
+        if (!webhook) {
+          await message.reply({ content: '❌ Failed to create webhook for character. Contact admin.', ephemeral: true });
+          return;
+        }
+
         if (isOOC) {
           const oocContent = userMessage.startsWith('//')
             ? userMessage.substring(2).trim()
             : userMessage.substring(1, userMessage.length - 1).trim();
 
-          const oocEmbed = new EmbedBuilder()
-            .setColor('#808080')
-            .setAuthor({
-              name: `${selectedChar.characterName} (OOC)`,
-              iconURL: selectedChar.avatarUrl
-            })
-            .setDescription(oocContent)
-            .setTimestamp();
-
-          await message.channel.send({ embeds: [oocEmbed] });
+          await webhook.send(`**(OOC)**: ${oocContent}`);
         } else if (isAction) {
           const actionContent = userMessage.startsWith('/action ')
             ? userMessage.substring(8).trim()
             : userMessage.substring(1, userMessage.length - 1).trim();
 
-          const actionEmbed = new EmbedBuilder()
-            .setColor('#ff9900')
-            .setAuthor({
-              name: selectedChar.characterName,
-              iconURL: selectedChar.avatarUrl
-            })
-            .setDescription(`*${actionContent}*`)
-            .setTimestamp();
-
-          await message.channel.send({ embeds: [actionEmbed] });
+          await webhook.send(`*${actionContent}*`);
         } else {
-          const dialogueEmbed = new EmbedBuilder()
-            .setColor('#9900ff')
-            .setAuthor({
-              name: selectedChar.characterName,
-              iconURL: selectedChar.avatarUrl
-            })
-            .setDescription(userMessage)
-            .setTimestamp();
-
-          await message.channel.send({ embeds: [dialogueEmbed] });
+          await webhook.send(`${userMessage}`);
         }
       }
     }
