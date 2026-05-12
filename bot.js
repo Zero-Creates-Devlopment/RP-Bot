@@ -509,7 +509,6 @@ client.on('messageCreate', async message => {
       if (inviteMatch && message.author.id === threadOwnerId) {
         const mentionedUserId = inviteMatch[1];
         const invitee = await client.users.fetch(mentionedUserId).catch(() => null);
-        await message.delete().catch(() => {});
         if (!invitee) {
           await message.reply({ content: '❌ User not found!', ephemeral: true });
           return;
@@ -544,12 +543,13 @@ client.on('messageCreate', async message => {
         } catch (error) {
           await message.reply({ content: `❌ Could not send the invite to ${invitee.username}. They may have DMs disabled.`, ephemeral: true });
         }
+        await message.delete().catch(() => {});
         return;
       }
 
       if (!isInvited) {
-        await message.delete().catch(() => {});
         await message.reply({ content: '❌ You are not invited to this RP thread. Only the owner can invite new users.', ephemeral: true });
+        await message.delete().catch(() => {});
         return;
       }
 
@@ -593,6 +593,7 @@ client.on('messageCreate', async message => {
         } else {
           await webhook.send(`${userMessage}`);
         }
+        await message.delete().catch(() => {});
       }
     }
   } catch (error) {
