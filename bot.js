@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Collection, REST, Routes, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, WebhookClient } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, REST, Routes, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
@@ -58,42 +58,6 @@ function saveThreads() {
 // Load characters and threads on startup
 loadCharacters();
 loadThreads();
-
-// Webhooks cache
-const webhookCache = {};
-
-// Function to get or create a webhook for a character in a thread
-async function getOrCreateWebhook(thread, characterName, avatarUrl) {
-  const cacheKey = `${thread.id}_${characterName}`;
-  
-  // Return cached webhook if available
-  if (webhookCache[cacheKey]) {
-    return webhookCache[cacheKey];
-  }
-  
-  try {
-    // Get existing webhooks for the thread
-    const webhooks = await thread.fetchWebhooks();
-    const existing = webhooks.find(w => w.name === characterName);
-    
-    if (existing) {
-      webhookCache[cacheKey] = existing;
-      return existing;
-    }
-    
-    // Create a new webhook
-    const webhook = await thread.createWebhook({
-      name: characterName,
-      avatar: avatarUrl
-    });
-    
-    webhookCache[cacheKey] = webhook;
-    return webhook;
-  } catch (error) {
-    console.error('Error getting/creating webhook:', error);
-    return null;
-  }
-}
 
 // Command data
 const commands = [
@@ -509,6 +473,7 @@ client.on('messageCreate', async message => {
       if (inviteMatch && message.author.id === threadOwnerId) {
         const mentionedUserId = inviteMatch[1];
         const invitee = await client.users.fetch(mentionedUserId).catch(() => null);
+        await message.delete().catch(() => {});
         if (!invitee) {
           await message.reply({ content: '❌ User not found!', ephemeral: true });
           return;
@@ -543,13 +508,12 @@ client.on('messageCreate', async message => {
         } catch (error) {
           await message.reply({ content: `❌ Could not send the invite to ${invitee.username}. They may have DMs disabled.`, ephemeral: true });
         }
-        await message.delete().catch(() => {});
         return;
       }
 
       if (!isInvited) {
-        await message.reply({ content: '❌ You are not invited to this RP thread. Only the owner can invite new users.', ephemeral: true });
         await message.delete().catch(() => {});
+        await message.reply({ content: '❌ You are not invited to this RP thread. Only the owner can invite new users.', ephemeral: true });
         return;
       }
 
@@ -568,31 +532,23 @@ client.on('messageCreate', async message => {
         const isAction = userMessage.startsWith('/action ') || (userMessage.startsWith('*') && userMessage.endsWith('*'));
         const isOOC = userMessage.startsWith('//') || (userMessage.startsWith('(') && userMessage.endsWith(')'));
 
-
-        // Get or create webhook for this character
-        const webhook = await getOrCreateWebhook(message.channel, selectedChar.characterName, selectedChar.avatarUrl);
-        
-        if (!webhook) {
-          await message.reply({ content: '❌ Failed to create webhook for character. Contact admin.', ephemeral: true });
-          return;
-        }
+        await message.delete().catch(() => {});
 
         if (isOOC) {
           const oocContent = userMessage.startsWith('//')
             ? userMessage.substring(2).trim()
             : userMessage.substring(1, userMessage.length - 1).trim();
 
-          await webhook.send(`**(OOC)**: ${oocContent}`);
+          await message.channel.send(`**${selectedChar.characterName} (OOC)**: ${oocContent}`);
         } else if (isAction) {
           const actionContent = userMessage.startsWith('/action ')
             ? userMessage.substring(8).trim()
             : userMessage.substring(1, userMessage.length - 1).trim();
 
-          await webhook.send(`*${actionContent}*`);
+          await message.channel.send(`*${selectedChar.characterName} ${actionContent}*`);
         } else {
-          await webhook.send(`${userMessage}`);
+          await message.channel.send(`**${selectedChar.characterName}**: ${userMessage}`);
         }
-        await message.delete().catch(() => {});
       }
     }
   } catch (error) {
