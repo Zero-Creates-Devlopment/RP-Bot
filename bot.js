@@ -198,7 +198,7 @@ client.on('interactionCreate', async interaction => {
         if (thread && user) {
           const acceptEmbed = new EmbedBuilder()
             .setColor('#00ff00')
-            .setDescription(`✅ **${user.username}** has accepted the invite and joined the RP thread!`);
+            .setDescription(`✅ **${user.username}** Has Joined The World!`);
 
           await thread.send({ embeds: [acceptEmbed] });
           await interaction.reply({ content: `✅ Invite accepted. Use "/charchange" in the thread to choose your character.`, ephemeral: true });
