@@ -473,14 +473,14 @@ client.on('messageCreate', async message => {
       if (inviteMatch && message.author.id === threadOwnerId) {
         const mentionedUserId = inviteMatch[1];
         const invitee = await client.users.fetch(mentionedUserId).catch(() => null);
-
+        await message.delete().catch(() => {});
         if (!invitee) {
-          await message.reply('❌ User not found!');
+          await message.reply({ content: '❌ User not found!', ephemeral: true });
           return;
         }
 
         if (rpThreadData.invited?.has(mentionedUserId)) {
-          await message.reply('❌ That user is already invited.');
+          await message.reply({ content: '❌ That user is already invited.', ephemeral: true });
           return;
         }
 
@@ -504,15 +504,16 @@ client.on('messageCreate', async message => {
 
         try {
           await invitee.send({ embeds: [inviteEmbed], components: [row] });
-          await message.reply(`✅ Invitation sent to ${invitee.username}!`);
+          await message.reply({ content: `✅ Invitation sent to ${invitee.username}!`, ephemeral: true });
         } catch (error) {
-          await message.reply(`❌ Could not send the invite to ${invitee.username}. They may have DMs disabled.`);
+          await message.reply({ content: `❌ Could not send the invite to ${invitee.username}. They may have DMs disabled.`, ephemeral: true });
         }
         return;
       }
 
       if (!isInvited) {
-        await message.reply('❌ You are not invited to this RP thread. Only the owner can invite new users.');
+        await message.delete().catch(() => {});
+        await message.reply({ content: '❌ You are not invited to this RP thread. Only the owner can invite new users.', ephemeral: true });
         return;
       }
 
@@ -523,7 +524,8 @@ client.on('messageCreate', async message => {
         let selectedChar = rpThreadData.users[message.author.id];
 
         if (!selectedChar) {
-          await message.reply('❌ You have been invited but do not have a selected character yet. Use `/charchange` in this thread to choose your character.');
+          await message.delete().catch(() => {});
+          await message.reply({ content: '❌ You have been invited but do not have a selected character yet. Use `/charchange` in this thread to choose your character.', ephemeral: true });
           return;
         }
 
