@@ -568,7 +568,6 @@ client.on('messageCreate', async message => {
         const isAction = userMessage.startsWith('/action ') || (userMessage.startsWith('*') && userMessage.endsWith('*'));
         const isOOC = userMessage.startsWith('//') || (userMessage.startsWith('(') && userMessage.endsWith(')'));
 
-        await message.delete().catch(() => {});
 
         // Get or create webhook for this character
         const webhook = await getOrCreateWebhook(message.channel, selectedChar.characterName, selectedChar.avatarUrl);
