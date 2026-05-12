@@ -341,7 +341,7 @@ client.on('interactionCreate', async interaction => {
         .setTitle(`🎭 ${character.name}`)
         .setDescription(character.description)
         .setThumbnail(character.avatarUrl)
-        .setFooter({ text: `RP Thread | Messages sent here will be roleplay'd by ${character.name}` });
+        .setFooter({ text: `RP Thread | ${character.name} Played By ${message.author.username}` });
 
       await thread.send({ embeds: [embed] });
 
@@ -400,7 +400,15 @@ client.on('interactionCreate', async interaction => {
       const notifEmbed = new EmbedBuilder()
         .setColor('#ffcc00')
         .setDescription(`✨ Character changed to **${character.name}**`);
+      // Send initial message with character info
+      const embed = new EmbedBuilder()
+        .setColor('#9900ff')
+        .setTitle(`🎭 ${character.name}`)
+        .setDescription(character.description)
+        .setThumbnail(character.avatarUrl)
+        .setFooter({ text: `RP Thread | ${character.name} Played By ${message.author.username}` });
 
+      await thread.send({ embeds: [embed] });
       await interaction.reply({ embeds: [notifEmbed], ephemeral: true });
     }
   } catch (error) {
